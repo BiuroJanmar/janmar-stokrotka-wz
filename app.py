@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.2")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.3")
 st.subheader("Dedykowany dekoder zamówień TXT dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -58,30 +58,37 @@ def dekoduj_txt_stokrotka(file_bytes):
             idx = lines.index(line)
             if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
 
-        # Nowy elastyczny parser dopasowany do formatu: 141203/0001
-        match_pozycja = re.match(r'^\s*(\d{6})/(\d{4})\s+(.+?)\s+(SZT|KG)\s+(SZT|KG)', line, re.IGNORECASE)
-        if match_pozycja:
-            kod_bazowy = match_pozycja.group(1)
-            surowa_nazwa = match_pozycja.group(3).strip().upper()
-            jm = match_pozycja.group(4).lower()
+        # TOTALNIE PANCOERNY PARSER: Szuka linii zaczynającej się od 6 cyfr i ukośnika
+        match_kod = re.match(r'^\s*(\d{6})/(\d{4})\s+(.+)', line)
+        if match_kod:
+            kod_bazowy = match_kod.group(1)
+            reszta_linii = match_kod.group(3).strip()
             
-            # Pobieramy liczby z końca wiersza
-            reszta_linii = line[match_pozycja.end():].strip().split()
-            if reszta_linii:
+            # Wyciągamy z reszty linii wszystkie ciągi liczb (ilości, ceny itp.)
+            liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', reszta_linii)
+            
+            if liczby:
                 try:
-                    # Zamawiana ilość to pierwsza duża liczba po jednostkach miary
-                    ilosc_koncowa = float(reszta_linii[0].replace(',', '.'))
+                    # Zamawiana ilość w formacie Stokrotki to pierwsza liczba zmiennoprzecinkowa na końcu nazwy
+                    # Oczyszczamy nazwę usuwając z końca liczby i jednostki miary (SZT, KG)
+                    nazwa_czysta = re.sub(r'\s+(SZT|KG|szt|kg).*', '', reszta_linii, flags=re.IGNORECASE).strip().upper()
                     
-                    w_opak = 10.0
-                    for k, waga in PRZELICZNIKI_STOKROTKA.items():
-                        if k in surowa_nazwa: w_opak = waga; break
-                        
-                    ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                    # Pierwsza liczba z wyciągniętych to nasza ilość (np. 360.00)
+                    ilosc_koncowa = float(liczby[0].replace(',', '.'))
+                    
                     if ilosc_koncowa > 0:
+                        jm = "szt" if "SZT" in reszta_linii.upper() else "kg"
+                        
+                        w_opak = 10.0
+                        for k, waga in PRZELICZNIKI_STOKROTKA.items():
+                            if k in nazwa_czysta: w_opak = waga; break
+                            
+                        ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                        
                         towary.append({
-                            'kod': kod_bazowy, 'nazwa': surowa_nazwa, 'jm': jm, 
+                            'kod': kod_bazowy, 'nazwa': nazwa_czysta, 'jm': jm, 
                             'w_opak': w_opak, 'ilosc_op': ilosc_op, 'ilosc_koncowa': ilosc_koncowa,
-                            'kraj': ustal_kraj_pochodzenia(surowa_nazwa)
+                            'kraj': ustal_kraj_pochodzenia(nazwa_czysta)
                         })
                 except: pass
                 
@@ -107,7 +114,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     border_all = Border(left=thin, right=thin, top=thin, bottom=thin)
     double_bottom = Border(top=Side(style='thin', color='D9D9D9'), bottom=Side(style='double', color='1F497D'))
     
-    # Nagłówki i układ dokładnie z Twojego szablonu
     ws['A1'] = "DOKUMENT WZ"
     ws['A1'].font = font_title
     ws.merge_cells('G1:H1')
@@ -115,7 +121,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['G1'].font = font_body_bold
     ws['G1'].alignment = Alignment(horizontal="right")
     
-    # Wolne miejsce po lewej (kolumny A-C) na Wasze logo Janmar wklejane w Excelu
     ws['D3'] = "DOSTAWCA:"
     ws['D3'].font = font_section
     ws['D4'] = "GPW JANMAR SP. Z O.O. SP. K."
@@ -221,20 +226,4 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     wb.save(output)
     return output.getvalue()
 
-uploaded_file = st.file_uploader("Załaduj oryginalny plik tekstowy Stokrotki (.TXT)", type=["txt"])
-
-if uploaded_file is not None:
-    file_bytes = uploaded_file.read()
-    with st.spinner("Przetwarzanie dokumentu Stokrotki..."):
-        nr_zam, data_zam, data_dost, miejsce, towary = dekoduj_txt_stokrotka(file_bytes)
-        if towary:
-            wz_excel = buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary)
-            st.success(f"Sukces! Wygenerowano WZ Stokrotka dla zamówienia nr: {nr_zam}")
-            st.download_button(
-                label="📥 Pobierz oficjalną WZ Stokrotka (Excel)",
-                data=wz_excel,
-                file_name=f"WZ_STOKROTKA_{nr_zam.replace('/', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.error("Błąd odczytu pliku TXT. System nie odnalazł linii produktowych.")
+uploaded_file = st.file_uploader("Załaduj oryginalny plik tekstowy
