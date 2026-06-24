@@ -4,11 +4,12 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from io import BytesIO
+from datetime import datetime
 import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.8")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.9")
 st.subheader("Oficjalny dekoder zamówień z silnika komputerowego Mac")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -20,32 +21,13 @@ DANE_DOSTAWCY = {
 }
 
 PRZELICZNIKI_STOKROTKA = {
-    "BROKUŁ": 10.0,
-    "KALAFIOR": 6.0,
-    "KAPUSTA PEKIŃSKA": 10.0,
-    "KAPUSTA BIAŁA": 10.0,
-    "KAPUSTA CZERWONA": 10.0,
-    "KAPUSTA WŁOSKA": 10.0,
-    "KAPUSTA WCZESNA": 6.0,
-    "KAPUSTA CZERWONA WCZESNA": 6.0,
-    "CUKINIA": 5.0,
-    "KALAREPA": 8.0,
-    "KUKURYDZA": 30.0,
-    "RZODKIEWKA": 10.0,
-    "SAŁATA LODOWA": 10.0,
-    "SAŁATA MASŁOWA": 12.0,
-    "SELER NACIOWY": 16.0,
-    "WŁOSZCZYZNA": 10.0,
-    "ARBUZ": 20.0,
-    "BRZOSKWINIE": 10.0,
-    "MORELE": 5.0,
-    "NEKTARYNY": 10.0,
-    "CEBULA CZERWONA": 5.0,
-    "CEBULA ŻÓTL": 10.0,
-    "CEBULA ŻÓŁTA": 10.0,
-    "MARCHEW": 10.0,
-    "PIETRUSZKA": 5.0,
-    "ZIEMNIAK": 15.0
+    "BROKUŁ": 10.0, "KALAFIOR": 6.0, "KAPUSTA PEKIŃSKA": 10.0, "KAPUSTA BIAŁA": 10.0,
+    "KAPUSTA CZERWONA": 10.0, "KAPUSTA WŁOSKA": 10.0, "KAPUSTA WCZESNA": 6.0,
+    "KAPUSTA CZERWONA WCZESNA": 6.0, "CUKINIA": 5.0, "KALAREPA": 8.0, "KUKURYDZA": 30.0,
+    "RZODKIEWKA": 10.0, "SAŁATA LODOWA": 10.0, "SAŁATA MASŁOWA": 12.0, "SELER NACIOWY": 16.0,
+    "WŁOSZCZYZNA": 10.0, "ARBUZ": 20.0, "BRZOSKWINIE": 10.0, "MORELE": 5.0, "NEKTARYNY": 10.0,
+    "CEBULA CZERWONA": 5.0, "CEBULA ŻÓTL": 10.0, "CEBULA ŻÓŁTA": 10.0, "MARCHEW": 10.0,
+    "PIETRUSZKA": 5.0, "ZIEMNIAK": 15.0
 }
 
 def ustal_kraj_pochodzenia(nazwa_towaru):
@@ -55,13 +37,14 @@ def ustal_kraj_pochodzenia(nazwa_towaru):
     if "ARBUZ" in nazwa_upper: return "WŁOCHY / HISZPANIA"
     return "POLSKA"
 
-# 1. ORYGINALNA METODA PARSOWANIA Z TWOJEGO AGENTA Z MACA (1 DO 1)
 def parsuj_zamowienie_stokrotka_oryginal(file_bytes):
     try: tekst = file_bytes.decode('windows-1250')
     except:
         try: tekst = file_bytes.decode('cp1250')
         except: tekst = file_bytes.decode('utf-8', errors='ignore')
         
+    # KLUCZOWA POPRAWKA: Usuwamy ukryte znaki powrotu karetki \r dla systemu Linux
+    tekst = tekst.replace('\r', '')
     lines = tekst.split('\n')
     
     nr_zamowienia = "Nieznany"
@@ -69,7 +52,6 @@ def parsuj_zamowienie_stokrotka_oryginal(file_bytes):
     data_dostawy = "................"
     miejsce_dostawy = "STOKROTKA CD"
     
-    # Wyciąganie nagłówków dokładnie tak jak na Macu
     for line in lines:
         if "ZAMÓWIENIE TOWARU NR" in line:
             match = re.search(r'NR\s*[:]?\s*([\d/]+)', line, re.IGNORECASE)
@@ -87,22 +69,17 @@ def parsuj_zamowienie_stokrotka_oryginal(file_bytes):
 
     pozycje = []
     for line_raw in lines:
-        if len(line_raw) < 20:
+        if len(line_raw) < 55:  # Zabezpieczenie przed krótkimi liniami
             continue
             
-        # Wyciąganie kodu i struktury dokładnie pozycjami znaków z Twojego kodu z Maca!
         kod_part = line_raw[0:15].strip()
         if '/' in kod_part:
             kod_part = kod_part.split('/')[0].strip()
             
         if kod_part.isdigit() and len(kod_part) == 6:
             kod_towaru = kod_part
-            
-            # Pobieranie kolumn według sztywnych szerokości z agent_stokrotka.py
             nazwa_towaru = line_raw[12:40].strip().upper()
             jm = line_raw[40:46].strip().lower().replace('.', '')
-            
-            # Wyciąganie ilości zamawianej (znaki 47 do 56 z kodu na Macu)
             ilosc_str = line_raw[46:57].strip().replace(',', '.')
             
             try:
@@ -118,12 +95,8 @@ def parsuj_zamowienie_stokrotka_oryginal(file_bytes):
                     kraj = ustal_kraj_pochodzenia(nazwa_towaru)
                     
                     pozycje.append({
-                        "kod": kod_towaru,
-                        "nazwa": nazwa_towaru,
-                        "jm": jm,
-                        "w_opak": w_opak,
-                        "ilosc_op": ilosc_op,
-                        "ilosc_koncowa": ilosc_koncowa,
+                        "kod": kod_towaru, "nazwa": nazwa_towaru, "jm": jm,
+                        "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
                         "kraj": kraj
                     })
             except:
@@ -131,7 +104,6 @@ def parsuj_zamowienie_stokrotka_oryginal(file_bytes):
                 
     return nr_zamowienia, data_zamowienia, data_dostawy, miejsce_dostawy, pozycje
 
-# 2. GENERATOR STRUKTURY ARTYKUŁÓW W EXCELU (ZGODNY Z SZABLON_WZ.XLSX)
 def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -159,7 +131,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['G1'].font = font_body_bold
     ws['G1'].alignment = Alignment(horizontal="right")
     
-    # Wolne miejsce na Wasze logo Janmar po lewej stronie
     ws['D3'] = "DOSTAWCA:"
     ws['D3'].font = font_section
     ws['D4'] = "GPW JANMAR SP. Z O.O. SP. K."
@@ -188,7 +159,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['A11'].alignment = Alignment(vertical="center")
     ws.row_dimensions[11].height = 24
     
-    # Nagłówki – dokładnie od wiersza 14!
     naglowki = ["Lp.", "Kod towaru", "Nazwa asortymentu", "Kraj pochodzenia", "Jm.", "W opak.", "Ilość op.", "Ilość szt./kg"]
     for col_idx, text in enumerate(naglowki, start=1):
         cell = ws.cell(row=14, column=col_idx, value=text)
@@ -200,7 +170,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     start_row = 15
     max_wiersz_siatki = 60
     
-    # Generowanie siatki wierszy 15-60
     for r in range(start_row, max_wiersz_siatki + 1):
         idx_towaru = r - start_row
         ws.row_dimensions[r].height = 22
@@ -233,7 +202,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
             c_koncowa.alignment = Alignment(horizontal="right")
             c_koncowa.number_format = '#,##0'
 
-    # Podsumowania logistyczne pod siatką (Wiersz 62)
     sum_row = max_wiersz_siatki + 2
     ws.row_dimensions[sum_row].height = 24
     ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
@@ -245,7 +213,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     sum_cell.border = double_bottom
     sum_cell.number_format = '#,##0'
     
-    # Stopka
     footer_row = sum_row + 2
     ws.row_dimensions[footer_row].height = 22
     ws.cell(row=footer_row, column=1, value="DOKUMENT SPORZĄDZIŁ: .............................").font = font_body_bold
