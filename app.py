@@ -6,12 +6,12 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v4.3")
+st.title("JANMAR WZ-Stokrotka Web v4.4")
 st.subheader("Oryginalny i czysty silnik z Twojego komputera Mac")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
-PRZELICZNIKI_STOKROTKA = {
-    "BROKUŁ": 10.0, "KALAFIOR": 6.0, "KAPUSTA PEKIŃSKA": 10.0, "KAPUSTA BIAŁA": 10.0,
+PRZELICZNIKI_SIECI = {
+    "KALAFIOR": 6.0, "KAPUSTA PEKIŃSKA": 10.0, "KAPUSTA BIAŁA": 10.0,
     "KAPUSTA CZERWONA": 10.0, "KAPUSTA WŁOSKA": 10.0, "KAPUSTA WCZESNA": 6.0,
     "CUKINIA": 5.0, "KALAREPA": 8.0, "KUKURYDZA": 30.0, "RZODKIEWKA": 10.0,
     "SAŁATA LODOWA": 10.0, "SAŁATA MASŁOWA": 12.0, "SELER NACIOWY": 16.0, "MARCHEW": 10.0
@@ -70,7 +70,7 @@ else:
                         ilosc_koncowa = float(ilosc_str)
                         if ilosc_koncowa > 0:
                             w_opak = 10.0
-                            for klucz, waga in PRZELICZNIKI_STOKROTKA.items():
+                            for klucz, waga in PRZELICZNIKI_SIECI.items():
                                 if klucz in nazwa_towaru:
                                     w_opak = waga
                                     break
