@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.5")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.6")
 st.subheader("Dedykowany dekoder zamówień TXT dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -58,15 +58,12 @@ def dekoduj_txt_stokrotka(file_bytes):
             idx = lines.index(line)
             if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
 
-        # LOGIKA PROSTO Z TWOJEGO AGENTA Z MACA: Splitujemy po spacjach
         parts = line.split()
         if len(parts) >= 6:
             surowy_kod = parts[0]
-            # Jeśli kod ma ukośnik (np. 141203/0001), wyciągamy tylko bazowe 6 cyfr
             kod_bazowy = surowy_kod.split('/')[0]
             
             if kod_bazowy.isdigit() and len(kod_bazowy) == 6:
-                # Szukamy jednostki miary (szt. / kg) tak jak w starym agencie
                 jm_idx = -1
                 nazwa_parts = []
                 for idx, p in enumerate(parts[1:], start=1):
@@ -80,7 +77,6 @@ def dekoduj_txt_stokrotka(file_bytes):
                     nazwa_czysta = " ".join(nazwa_parts).upper()
                     jm = parts[jm_idx].lower().replace('.', '')
                     try:
-                        # Ilość końcowa to element tuż przed jednostką miary
                         ilosc_koncowa = float(parts[jm_idx - 1].replace(',', '.'))
                         
                         if ilosc_koncowa > 0 and not nazwa_czysta.isdigit():
@@ -119,6 +115,7 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     border_all = Border(left=thin, right=thin, top=thin, bottom=thin)
     double_bottom = Border(top=Side(style='thin', color='D9D9D9'), bottom=Side(style='double', color='1F497D'))
     
+    # 1. Nagłówek i sekcje adresowe
     ws['A1'] = "DOKUMENT WZ"
     ws['A1'].font = font_title
     ws.merge_cells('G1:H1')
@@ -154,6 +151,7 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['A11'].alignment = Alignment(vertical="center")
     ws.row_dimensions[11].height = 24
     
+    # Nagłówki w wierszu 14
     naglowki = ["Lp.", "Kod towaru", "Nazwa asortymentu", "Kraj pochodzenia", "Jm.", "W opak.", "Ilość op.", "Ilość szt./kg"]
     for col_idx, text in enumerate(naglowki, start=1):
         cell = ws.cell(row=14, column=col_idx, value=text)
@@ -165,18 +163,23 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     start_row = 15
     max_wiersz_siatki = 60
     
+    # 2. Budowanie siatki wierszy (sztywno od 15 do 60)
     for r in range(start_row, max_wiersz_siatki + 1):
         idx_towaru = r - start_row
         ws.row_dimensions[r].height = 22
         
+        # Przygotowanie czystej linii z domyślnym krajem
         ws.cell(row=r, column=1, value=idx_towaru + 1).alignment = Alignment(horizontal="center")
         ws.cell(row=r, column=4, value="POLSKA").alignment = Alignment(horizontal="center")
         
-        for c in range(1, 8 + 1):
-            ws.cell(row=r, column=c).border = border_all
-            ws.cell(row=r, column=c).font = font_body
-            if idx_towaru % 2 == 1: ws.cell(row=r, column=c).fill = zebra_fill
+        # Nakładanie ramek i styli na całą szerokość tabeli (kolumny 1-8)
+        for c in range(1, 9):
+            cell = ws.cell(row=r, column=c)
+            cell.border = thin
+            cell.font = font_body
+            if idx_towaru % 2 == 1: cell.fill = zebra_fill
                 
+        # Wpisywanie danych – chirurgiczne celowanie w konkretne kolumny literowe!
         if idx_towaru < len(towary):
             t = towary[idx_towaru]
             ws.cell(row=r, column=2, value=t['kod']).alignment = Alignment(horizontal="center")
@@ -184,18 +187,19 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
             ws.cell(row=r, column=4, value=t['kraj']).alignment = Alignment(horizontal="center")
             ws.cell(row=r, column=5, value=t['jm']).alignment = Alignment(horizontal="center")
             
-            cell_w_opak = ws.cell(row=r, column=6, value=t['w_opak'])
-            cell_w_opak.alignment = Alignment(horizontal="right")
-            cell_w_opak.number_format = '#,##0.0'
+            c_w_opak = ws.cell(row=r, column=6, value=t['w_opak'])
+            c_w_opak.alignment = Alignment(horizontal="right")
+            c_w_opak.number_format = '#,##0.0'
             
-            cell_op = ws.cell(row=r, column=7, value=t['ilosc_op'])
-            cell_op.alignment = Alignment(horizontal="right")
-            cell_op.number_format = '#,##0.0'
+            c_op = ws.cell(row=r, column=7, value=t['ilosc_op'])
+            c_op.alignment = Alignment(horizontal="right")
+            c_op.number_format = '#,##0.0'
             
-            cell_koncowa = ws.cell(row=r, column=8, value=t['ilosc_koncowa'])
-            cell_koncowa.alignment = Alignment(horizontal="right")
-            cell_koncowa.number_format = '#,##0'
+            c_koncowa = ws.cell(row=r, column=8, value=t['ilosc_koncowa'])
+            c_koncowa.alignment = Alignment(horizontal="right")
+            c_koncowa.number_format = '#,##0'
 
+    # Podsumowanie pod siatką
     sum_row = max_wiersz_siatki + 2
     ws.row_dimensions[sum_row].height = 24
     ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
