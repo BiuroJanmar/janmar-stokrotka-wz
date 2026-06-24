@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.6")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.7")
 st.subheader("Dedykowany dekoder zamówień TXT dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -37,8 +37,12 @@ def ustal_kraj_pochodzenia(nazwa_towaru):
     return "POLSKA"
 
 def dekoduj_txt_stokrotka(file_bytes):
+    # Próba otwarcia pliku za pomocą różnych standardów kodowania polskich znaków
     try: tekst = file_bytes.decode('windows-1250')
-    except: tekst = file_bytes.decode('utf-8', errors='ignore')
+    except:
+        try: tekst = file_bytes.decode('cp1250')
+        except: tekst = file_bytes.decode('utf-8', errors='ignore')
+        
     lines = tekst.split('\n')
     
     nr_zam, data_zam, data_dost = "Nieznany", "Nieznana", "Nieznana"
@@ -46,20 +50,25 @@ def dekoduj_txt_stokrotka(file_bytes):
     towary = []
     
     for line in lines:
-        if "ZAMÓWIENIE TOWARU NR" in line:
-            match = re.search(r'NR\s+([\d/]+)', line)
+        # Elastyczne szukanie numeru zamówienia (obsługuje opcję z dwukropkiem i bez)
+        if "ZAMÓWIENIE TOWARU" in line:
+            match = re.search(r'(?:NR|NR:)\s+([\d/]+)', line, re.IGNORECASE)
             if match: nr_zam = match.group(1)
+            
         if "Termin dostawy" in line:
             match_dost = re.search(r'Termin dostawy\s+([\d\.]+)', line)
             match_wyst = re.search(r'Data wystawienia\s+([\d\.]+)', line)
             if match_dost: data_dost = match_dost.group(1)
             if match_wyst: data_zam = match_wyst.group(1)
+            
         if "Towar należy dostarczyć:" in line:
-            idx = lines.index(line)
-            if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
+            try:
+                idx = lines.index(line)
+                if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
+            except: pass
 
         parts = line.split()
-        if len(parts) >= 6:
+        if len(parts) >= 5:
             surowy_kod = parts[0]
             kod_bazowy = surowy_kod.split('/')[0]
             
@@ -67,7 +76,7 @@ def dekoduj_txt_stokrotka(file_bytes):
                 jm_idx = -1
                 nazwa_parts = []
                 for idx, p in enumerate(parts[1:], start=1):
-                    if p.lower() in ['szt.', 'kg', 'szt']:
+                    if p.lower() in ['szt.', 'kg', 'szt', 'kg.']:
                         jm_idx = idx
                         break
                     if not (p.isdigit() and len(p) > 7): 
@@ -107,15 +116,14 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     font_body = Font(name="Arial", size=10, bold=False, color="000000")
     font_body_bold = Font(name="Arial", size=10, bold=True, color="000000")
     
-    header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
-    info_bar_fill = PatternFill(start_color="E9EDF4", end_color="E9EDF4", fill_type="solid")
-    zebra_fill = PatternFill(start_color="F2F5F8", end_color="F2F5F8", fill_type="solid")
+    header_fill = PatternFill(start_color="1F497D", fill_type="solid")
+    info_bar_fill = PatternFill(start_color="E9EDF4", fill_type="solid")
+    zebra_fill = PatternFill(start_color="F2F5F8", fill_type="solid")
     
     thin = Side(style='thin', color='D9D9D9')
     border_all = Border(left=thin, right=thin, top=thin, bottom=thin)
     double_bottom = Border(top=Side(style='thin', color='D9D9D9'), bottom=Side(style='double', color='1F497D'))
     
-    # 1. Nagłówek i sekcje adresowe
     ws['A1'] = "DOKUMENT WZ"
     ws['A1'].font = font_title
     ws.merge_cells('G1:H1')
@@ -151,7 +159,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['A11'].alignment = Alignment(vertical="center")
     ws.row_dimensions[11].height = 24
     
-    # Nagłówki w wierszu 14
     naglowki = ["Lp.", "Kod towaru", "Nazwa asortymentu", "Kraj pochodzenia", "Jm.", "W opak.", "Ilość op.", "Ilość szt./kg"]
     for col_idx, text in enumerate(naglowki, start=1):
         cell = ws.cell(row=14, column=col_idx, value=text)
@@ -163,23 +170,19 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     start_row = 15
     max_wiersz_siatki = 60
     
-    # 2. Budowanie siatki wierszy (sztywno od 15 do 60)
     for r in range(start_row, max_wiersz_siatki + 1):
         idx_towaru = r - start_row
         ws.row_dimensions[r].height = 22
         
-        # Przygotowanie czystej linii z domyślnym krajem
         ws.cell(row=r, column=1, value=idx_towaru + 1).alignment = Alignment(horizontal="center")
         ws.cell(row=r, column=4, value="POLSKA").alignment = Alignment(horizontal="center")
         
-        # Nakładanie ramek i styli na całą szerokość tabeli (kolumny 1-8)
         for c in range(1, 9):
             cell = ws.cell(row=r, column=c)
-            cell.border = thin
+            cell.border = border_all
             cell.font = font_body
             if idx_towaru % 2 == 1: cell.fill = zebra_fill
                 
-        # Wpisywanie danych – chirurgiczne celowanie w konkretne kolumny literowe!
         if idx_towaru < len(towary):
             t = towary[idx_towaru]
             ws.cell(row=r, column=2, value=t['kod']).alignment = Alignment(horizontal="center")
@@ -199,7 +202,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
             c_koncowa.alignment = Alignment(horizontal="right")
             c_koncowa.number_format = '#,##0'
 
-    # Podsumowanie pod siatką
     sum_row = max_wiersz_siatki + 2
     ws.row_dimensions[sum_row].height = 24
     ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
