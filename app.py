@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.1")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.2")
 st.subheader("Dedykowany dekoder zamówień TXT dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -58,33 +58,33 @@ def dekoduj_txt_stokrotka(file_bytes):
             idx = lines.index(line)
             if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
 
-        parts = line.split()
-        if len(parts) >= 6 and parts[0].isdigit() and len(parts[0]) == 6:
-            kod = parts[0]
-            nazwa_parts = []
-            jm_idx = -1
-            for idx, p in enumerate(parts[1:], start=1):
-                if p.lower() in ['szt.', 'kg', 'szt']:
-                    jm_idx = idx
-                    break
-                if not (p.isdigit() and len(p) > 7): nazwa_parts.append(p)
-            if jm_idx != -1:
-                nazwa = " ".join(nazwa_parts).upper()
-                jm = parts[jm_idx]
+        # Nowy elastyczny parser dopasowany do formatu: 141203/0001
+        match_pozycja = re.match(r'^\s*(\d{6})/(\d{4})\s+(.+?)\s+(SZT|KG)\s+(SZT|KG)', line, re.IGNORECASE)
+        if match_pozycja:
+            kod_bazowy = match_pozycja.group(1)
+            surowa_nazwa = match_pozycja.group(3).strip().upper()
+            jm = match_pozycja.group(4).lower()
+            
+            # Pobieramy liczby z końca wiersza
+            reszta_linii = line[match_pozycja.end():].strip().split()
+            if reszta_linii:
                 try:
-                    ilosc_koncowa = float(parts[jm_idx - 1].replace(',', '.'))
+                    # Zamawiana ilość to pierwsza duża liczba po jednostkach miary
+                    ilosc_koncowa = float(reszta_linii[0].replace(',', '.'))
+                    
                     w_opak = 10.0
                     for k, waga in PRZELICZNIKI_STOKROTKA.items():
-                        if k in nazwa: w_opak = waga; break
+                        if k in surowa_nazwa: w_opak = waga; break
                         
                     ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
-                    if ilosc_koncowa > 0 and not nazwa.isdigit():
+                    if ilosc_koncowa > 0:
                         towary.append({
-                            'kod': kod, 'nazwa': nazwa, 'jm': jm, 
+                            'kod': kod_bazowy, 'nazwa': surowa_nazwa, 'jm': jm, 
                             'w_opak': w_opak, 'ilosc_op': ilosc_op, 'ilosc_koncowa': ilosc_koncowa,
-                            'kraj': ustal_kraj_pochodzenia(nazwa)
+                            'kraj': ustal_kraj_pochodzenia(surowa_nazwa)
                         })
                 except: pass
+                
     return nr_zam, data_zam, data_dost, miejsce_dostawy, towary
 
 def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
@@ -107,7 +107,7 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     border_all = Border(left=thin, right=thin, top=thin, bottom=thin)
     double_bottom = Border(top=Side(style='thin', color='D9D9D9'), bottom=Side(style='double', color='1F497D'))
     
-    # 1. Nagłówek i sekcje adresowe kropka w kropkę z Twojego szablonu
+    # Nagłówki i układ dokładnie z Twojego szablonu
     ws['A1'] = "DOKUMENT WZ"
     ws['A1'].font = font_title
     ws.merge_cells('G1:H1')
@@ -115,7 +115,7 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['G1'].font = font_body_bold
     ws['G1'].alignment = Alignment(horizontal="right")
     
-    # Zostawiamy wiersze 3-6 wolne po lewej na oryginalne logo wklejane w Excelu
+    # Wolne miejsce po lewej (kolumny A-C) na Wasze logo Janmar wklejane w Excelu
     ws['D3'] = "DOSTAWCA:"
     ws['D3'].font = font_section
     ws['D4'] = "GPW JANMAR SP. Z O.O. SP. K."
@@ -130,7 +130,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['G5'] = "ul. Projektowa 1, 20-209 Lublin"
     ws['G5'].font = font_body
     
-    # Dane logistyczne (Wiersze 7-9)
     ws.cell(row=7, column=1, value="Nr zamówienia Stokrotka:").font = font_body_bold
     ws.cell(row=7, column=3, value=nr_zam).font = font_body
     ws.cell(row=8, column=1, value="Data zamówienia:").font = font_body_bold
@@ -145,7 +144,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     ws['A11'].alignment = Alignment(vertical="center")
     ws.row_dimensions[11].height = 24
     
-    # Nagłówki tabeli – dokładnie w wierszu 14!
     naglowki = ["Lp.", "Kod towaru", "Nazwa asortymentu", "Kraj pochodzenia", "Jm.", "W opak.", "Ilość op.", "Ilość szt./kg"]
     for col_idx, text in enumerate(naglowki, start=1):
         cell = ws.cell(row=14, column=col_idx, value=text)
@@ -154,7 +152,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
         cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[14].height = 24
         
-    # Towary wchodzą od wiersza 15, a siatka leci sztywno do wiersza 60!
     start_row = 15
     max_wiersz_siatki = 60
     
@@ -162,15 +159,13 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
         idx_towaru = r - start_row
         ws.row_dimensions[r].height = 22
         
-        # Generowanie lp i struktury komórek
         ws.cell(row=r, column=1, value=idx_towaru + 1).alignment = Alignment(horizontal="center")
-        ws.cell(row=r, column=4, value="POLSKA").alignment = Alignment(horizontal="center") # Domyślny kraj
+        ws.cell(row=r, column=4, value="POLSKA").alignment = Alignment(horizontal="center")
         
-        for c in range(1, 9):
+        for c in range(1, 8 + 1):
             ws.cell(row=r, column=c).border = border_all
-            ws.cell(row=r, column=c).font = font_regular = font_body
-            if idx_towaru % 2 == 1:
-                ws.cell(row=r, column=c).fill = zebra_fill
+            ws.cell(row=r, column=c).font = font_body
+            if idx_towaru % 2 == 1: ws.cell(row=r, column=c).fill = zebra_fill
                 
         if idx_towaru < len(towary):
             t = towary[idx_towaru]
@@ -191,7 +186,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
             cell_koncowa.alignment = Alignment(horizontal="right")
             cell_koncowa.number_format = '#,##0'
 
-    # Podsumowania logistyczne zaraz pod siatką (Wiersz 62 i 63)
     sum_row = max_wiersz_siatki + 2
     ws.row_dimensions[sum_row].height = 24
     ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
@@ -203,7 +197,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     sum_cell.border = double_bottom
     sum_cell.number_format = '#,##0'
     
-    # Stopka dokumentu (Wiersz 65)
     footer_row = sum_row + 2
     ws.row_dimensions[footer_row].height = 22
     ws.cell(row=footer_row, column=1, value="DOKUMENT SPORZĄDZIŁ: .............................").font = font_body_bold
