@@ -2,11 +2,12 @@ import streamlit as st
 import openpyxl
 from io import BytesIO
 import os
+import re
 
-st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
+st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v4.1")
-st.subheader("Oryginalny silnik z Twojego Maca przeniesiony na stronę internetową")
+st.title("JANMAR WZ-Stokrotka Web v4.3")
+st.subheader("Oryginalny i czysty silnik z Twojego komputera Mac")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_STOKROTKA = {
@@ -34,16 +35,18 @@ else:
         nazwa_pliku = uploaded_file.name
         file_bytes = uploaded_file.read()
         
-        # Odtworzenie identycznego czytania linii jak f.readlines() na Macu
         try: tekst = file_bytes.decode('cp1250', errors='ignore')
         except: tekst = file_bytes.decode('utf-8', errors='ignore')
         
-        # Podział z zachowaniem struktury windowsowej dla dokładności wycinania znaków
         linie = tekst.splitlines(keepends=True)
         
         nr_zam = "Nieznany"
-        if "nr" in nazwa_pliku.lower():
-            try: nr_zam = nazwa_pliku.lower().split("nr")[1].split()[0].replace(".txt","")
+        nazwa_pliku_lower = nazwa_pliku.lower()
+        if "nr" in nazwa_pliku_lower:
+            try: nr_zam = nazwa_pliku_lower.split("nr")[1].split()[0].replace(".txt","")
+            except: nr_zam = nazwa_pliku.replace(".txt","").replace(".TXT","")
+        elif "zam." in nazwa_pliku_lower:
+            try: nr_zam = nazwa_pliku_lower.split("zam.")[1].split()[0].replace(".txt","")
             except: nr_zam = nazwa_pliku.replace(".txt","").replace(".TXT","")
         else:
             nr_zam = nazwa_pliku.replace(".txt","").replace(".TXT","")
@@ -93,7 +96,6 @@ else:
             
             for line in linie:
                 if "Termin dostawy" in line:
-                    import re
                     match_dost = re.search(r'Termin dostawy\s+([\d\.]+)', line)
                     match_wyst = re.search(r'Data wystawienia\s+([\d\.]+)', line)
                     if match_dost: data_dostawy = match_dost.group(1)
@@ -125,7 +127,7 @@ else:
             wb.save(output)
             wz_excel = output.getvalue()
             
-            st.success(f"Sukces! Dane zostały naniesione na Twój szablon WZ.")
+            st.success("Sukces! Dane zostały naniesione na Twój szablon WZ.")
             st.download_button(
                 label="📥 Pobierz oficjalną WZ Stokrotka (Excel)",
                 data=wz_excel,
