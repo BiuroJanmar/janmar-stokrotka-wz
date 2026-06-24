@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.4")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.5")
 st.subheader("Dedykowany dekoder zamówień TXT dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -58,31 +58,44 @@ def dekoduj_txt_stokrotka(file_bytes):
             idx = lines.index(line)
             if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
 
-        match_kod = re.match(r'^\s*(\d{6})/(\d{4})\s+(.+)', line)
-        if match_kod:
-            kod_bazowy = match_kod.group(1)
-            reszta_linii = match_kod.group(3).strip()
-            liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', reszta_linii)
+        # LOGIKA PROSTO Z TWOJEGO AGENTA Z MACA: Splitujemy po spacjach
+        parts = line.split()
+        if len(parts) >= 6:
+            surowy_kod = parts[0]
+            # Jeśli kod ma ukośnik (np. 141203/0001), wyciągamy tylko bazowe 6 cyfr
+            kod_bazowy = surowy_kod.split('/')[0]
             
-            if liczby:
-                try:
-                    nazwa_czysta = re.sub(r'\s+(SZT|KG|szt|kg).*', '', reszta_linii, flags=re.IGNORECASE).strip().upper()
-                    ilosc_koncowa = float(liczby[0].replace(',', '.'))
-                    
-                    if ilosc_koncowa > 0:
-                        jm = "szt" if "SZT" in reszta_linii.upper() else "kg"
-                        w_opak = 10.0
-                        for k, waga in PRZELICZNIKI_STOKROTKA.items():
-                            if k in nazwa_czysta: w_opak = waga; break
-                            
-                        ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+            if kod_bazowy.isdigit() and len(kod_bazowy) == 6:
+                # Szukamy jednostki miary (szt. / kg) tak jak w starym agencie
+                jm_idx = -1
+                nazwa_parts = []
+                for idx, p in enumerate(parts[1:], start=1):
+                    if p.lower() in ['szt.', 'kg', 'szt']:
+                        jm_idx = idx
+                        break
+                    if not (p.isdigit() and len(p) > 7): 
+                        nazwa_parts.append(p)
                         
-                        towary.append({
-                            'kod': kod_bazowy, 'nazwa': nazwa_czysta, 'jm': jm, 
-                            'w_opak': w_opak, 'ilosc_op': ilosc_op, 'ilosc_koncowa': ilosc_koncowa,
-                            'kraj': ustal_kraj_pochodzenia(nazwa_czysta)
-                        })
-                except: pass
+                if jm_idx != -1:
+                    nazwa_czysta = " ".join(nazwa_parts).upper()
+                    jm = parts[jm_idx].lower().replace('.', '')
+                    try:
+                        # Ilość końcowa to element tuż przed jednostką miary
+                        ilosc_koncowa = float(parts[jm_idx - 1].replace(',', '.'))
+                        
+                        if ilosc_koncowa > 0 and not nazwa_czysta.isdigit():
+                            w_opak = 10.0
+                            for k, waga in PRZELICZNIKI_STOKROTKA.items():
+                                if k in nazwa_czysta: w_opak = waga; break
+                                
+                            ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                            
+                            towary.append({
+                                'kod': kod_bazowy, 'nazwa': nazwa_czysta, 'jm': jm, 
+                                'w_opak': w_opak, 'ilosc_op': ilosc_op, 'ilosc_koncowa': ilosc_koncowa,
+                                'kraj': ustal_kraj_pochodzenia(nazwa_czysta)
+                            })
+                    except: pass
                 
     return nr_zam, data_zam, data_dost, miejsce_dostawy, towary
 
@@ -218,7 +231,6 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     wb.save(output)
     return output.getvalue()
 
-# Zabezpieczone linijki interfejsu (krótkie, bez łamania wierszy)
 uploaded_file = st.file_uploader("Wgraj plik zamówienia Stokrotki (.TXT)", type=["txt"])
 
 if uploaded_file is not None:
