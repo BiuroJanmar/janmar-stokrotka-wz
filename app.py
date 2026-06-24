@@ -4,105 +4,109 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from io import BytesIO
-from datetime import datetime
 import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.9")
-st.subheader("Oficjalny dekoder zamówień z silnika komputerowego Mac")
+st.title("🥦 JANMAR WZ-Stokrotka Web v2.0")
+st.subheader("Pancerny, elastyczny dekoder zamówień dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
-DANE_DOSTAWCY = {
-    "nazwa": "GPW JANMAR SP. Z O.O. SP. K.",
-    "adres_1": "ul. Gołaśka 3/58",
-    "adres_2": "30-619 Kraków",
-    "nip": "6793087742"
+SLOWNIK_POCHODZENIA = {
+    "POMARAŃCZE": "HISZPANIA / MAROKO",
+    "MANDARYNKI": "HISZPANIA / TURCJA",
+    "ZIEMNIAKI IMPORTOWE": "CYPR / GRECJA",
+    "ARBUZ": "WŁOCHY / HISZPANIA",
+    "MARCHEW": "POLSKA",
+    "PIETRUSZKA": "POLSKA",
+    "KALAFIOR": "POLSKA"
 }
 
 PRZELICZNIKI_STOKROTKA = {
     "BROKUŁ": 10.0, "KALAFIOR": 6.0, "KAPUSTA PEKIŃSKA": 10.0, "KAPUSTA BIAŁA": 10.0,
     "KAPUSTA CZERWONA": 10.0, "KAPUSTA WŁOSKA": 10.0, "KAPUSTA WCZESNA": 6.0,
-    "KAPUSTA CZERWONA WCZESNA": 6.0, "CUKINIA": 5.0, "KALAREPA": 8.0, "KUKURYDZA": 30.0,
-    "RZODKIEWKA": 10.0, "SAŁATA LODOWA": 10.0, "SAŁATA MASŁOWA": 12.0, "SELER NACIOWY": 16.0,
-    "WŁOSZCZYZNA": 10.0, "ARBUZ": 20.0, "BRZOSKWINIE": 10.0, "MORELE": 5.0, "NEKTARYNY": 10.0,
-    "CEBULA CZERWONA": 5.0, "CEBULA ŻÓTL": 10.0, "CEBULA ŻÓŁTA": 10.0, "MARCHEW": 10.0,
-    "PIETRUSZKA": 5.0, "ZIEMNIAK": 15.0
+    "CUKINIA": 5.0, "KALAREPA": 8.0, "KUKURYDZA": 30.0, "RZODKIEWKA": 10.0,
+    "SAŁATA LODOWA": 10.0, "SAŁATA MASŁOWA": 12.0, "SELER NACIOWY": 16.0, "MARCHEW": 10.0
 }
 
 def ustal_kraj_pochodzenia(nazwa_towaru):
     nazwa_upper = nazwa_towaru.upper()
-    if any(x in nazwa_upper for x in ["POMARAŃCZE", "MANDARYNKI"]): return "HISZPANIA / TURCJA"
-    if "ZIEMNIAKI IMPORTOWE" in nazwa_upper: return "CYPR / GRECJA"
-    if "ARBUZ" in nazwa_upper: return "WŁOCHY / HISZPANIA"
+    for klucz, kraj in SLOWNIK_POCHODZENIA.items():
+        if klucz in nazwa_upper: return kraj
     return "POLSKA"
 
-def parsuj_zamowienie_stokrotka_oryginal(file_bytes):
+def dekoduj_txt_stokrotka(file_bytes):
     try: tekst = file_bytes.decode('windows-1250')
     except:
         try: tekst = file_bytes.decode('cp1250')
         except: tekst = file_bytes.decode('utf-8', errors='ignore')
         
-    # KLUCZOWA POPRAWKA: Usuwamy ukryte znaki powrotu karetki \r dla systemu Linux
     tekst = tekst.replace('\r', '')
     lines = tekst.split('\n')
     
-    nr_zamowienia = "Nieznany"
-    data_zamowienia = "................"
-    data_dostawy = "................"
+    nr_zam, data_zam, data_dost = "Nieznany", "Nieznana", "Nieznana"
     miejsce_dostawy = "STOKROTKA CD"
+    towary = []
     
     for line in lines:
-        if "ZAMÓWIENIE TOWARU NR" in line:
-            match = re.search(r'NR\s*[:]?\s*([\d/]+)', line, re.IGNORECASE)
-            if match: nr_zamowienia = match.group(1)
+        if "ZAMÓWIENIE TOWARU" in line:
+            match = re.search(r'(?:NR|NR:)\s+([\d/]+)', line, re.IGNORECASE)
+            if match: nr_zam = match.group(1)
         if "Termin dostawy" in line:
             match_dost = re.search(r'Termin dostawy\s+([\d\.]+)', line)
             match_wyst = re.search(r'Data wystawienia\s+([\d\.]+)', line)
-            if match_dost: data_dostawy = match_dost.group(1)
-            if match_wyst: data_zamowienia = match_wyst.group(1)
+            if match_dost: data_dost = match_dost.group(1)
+            if match_wyst: data_zam = match_wyst.group(1)
         if "Towar należy dostarczyć:" in line:
             try:
                 idx = lines.index(line)
                 if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
             except: pass
 
-    pozycje = []
-    for line_raw in lines:
-        if len(line_raw) < 55:  # Zabezpieczenie przed krótkimi liniami
-            continue
+        # NOWA ELASTYCZNA METODA: Splitujemy linię po białych znakach (spacjach)
+        parts = line.split()
+        if len(parts) >= 5:
+            surowy_kod = parts[0]
+            # Wyciągamy bazowe 6 cyfr kodu (obsługa formatu ze slashem)
+            kod_bazowy = surowy_kod.split('/')[0].strip()
             
-        kod_part = line_raw[0:15].strip()
-        if '/' in kod_part:
-            kod_part = kod_part.split('/')[0].strip()
-            
-        if kod_part.isdigit() and len(kod_part) == 6:
-            kod_towaru = kod_part
-            nazwa_towaru = line_raw[12:40].strip().upper()
-            jm = line_raw[40:46].strip().lower().replace('.', '')
-            ilosc_str = line_raw[46:57].strip().replace(',', '.')
-            
-            try:
-                ilosc_koncowa = float(ilosc_str)
-                if ilosc_koncowa > 0:
-                    w_opak = 10.0
-                    for klucz, waga in PRZELICZNIKI_STOKROTKA.items():
-                        if klucz in nazwa_towaru:
-                            w_opak = waga
-                            break
-                            
-                    ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
-                    kraj = ustal_kraj_pochodzenia(nazwa_towaru)
+            if kod_bazowy.isdigit() and len(kod_bazowy) == 6:
+                # Na końcu linii w Stokrotce zawsze stoi zamawiana ilość (np. 360.000)
+                try:
+                    ilosc_koncowa = float(parts[-1].replace(',', '.'))
                     
-                    pozycje.append({
-                        "kod": kod_towaru, "nazwa": nazwa_towaru, "jm": jm,
-                        "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
-                        "kraj": kraj
-                    })
-            except:
-                pass
+                    # Jednostka miary (szt/kg) zazwyczaj kręci się w środku wiersza
+                    jm = "szt"
+                    for p in parts:
+                        if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
+                            jm = p.lower().replace('.', '')
+                            break
+                    
+                    # Budujemy nazwę asortymentu ze słów pomiędzy kodem a jednostkami/liczbami
+                    nazwa_parts = []
+                    for p in parts[1:]:
+                        if p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or p.replace(',', '').replace('.', '').isdigit():
+                            break
+                        nazwa_parts.append(p)
+                        
+                    nazwa_czysta = " ".join(nazwa_parts).upper()
+                    
+                    if ilosc_koncowa > 0 and len(nazwa_czysta) > 2:
+                        w_opak = 10.0
+                        for k, waga in PRZELICZNIKI_STOKROTKA.items():
+                            if k in nazwa_czysta: w_opak = waga; break
+                            
+                        ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                        
+                        towary.append({
+                            'kod': kod_bazowy, 'nazwa': nazwa_czysta, 'jm': jm, 
+                            'w_opak': w_opak, 'ilosc_op': ilosc_op, 'ilosc_koncowa': ilosc_koncowa,
+                            'kraj': ustal_kraj_pochodzenia(nazwa_czysta)
+                        })
+                except:
+                    pass
                 
-    return nr_zamowienia, data_zamowienia, data_dostawy, miejsce_dostawy, pozycje
+    return nr_zam, data_zam, data_dost, miejsce_dostawy, towary
 
 def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     wb = openpyxl.Workbook()
@@ -241,8 +245,8 @@ uploaded_file = st.file_uploader("Wgraj plik zamówienia Stokrotki (.TXT)", type
 
 if uploaded_file is not None:
     file_bytes = uploaded_file.read()
-    with st.spinner("Przetwarzanie pliku oryginalnym algorytmem..."):
-        nr_zam, data_zam, data_dost, miejsce, towary = parsuj_zamowienie_stokrotka_oryginal(file_bytes)
+    with st.spinner("Przetwarzanie pliku pancernego..."):
+        nr_zam, data_zam, data_dost, miejsce, towary = dekoduj_txt_stokrotka(file_bytes)
         if towary:
             wz_excel = buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary)
             st.success(f"Wygenerowano WZ Stokrotka nr: {nr_zam}")
