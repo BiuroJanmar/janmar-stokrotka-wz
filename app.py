@@ -9,7 +9,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v1.3")
+st.title("🥦 JANMAR WZ-Stokrotka Web v1.4")
 st.subheader("Dedykowany dekoder zamówień TXT dla sieci Stokrotka")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki, aby wygenerować oficjalny arkusz WZ.")
 
@@ -58,27 +58,19 @@ def dekoduj_txt_stokrotka(file_bytes):
             idx = lines.index(line)
             if idx + 1 < len(lines): miejsce_dostawy = lines[idx+1].strip()
 
-        # TOTALNIE PANCOERNY PARSER: Szuka linii zaczynającej się od 6 cyfr i ukośnika
         match_kod = re.match(r'^\s*(\d{6})/(\d{4})\s+(.+)', line)
         if match_kod:
             kod_bazowy = match_kod.group(1)
             reszta_linii = match_kod.group(3).strip()
-            
-            # Wyciągamy z reszty linii wszystkie ciągi liczb (ilości, ceny itp.)
             liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', reszta_linii)
             
             if liczby:
                 try:
-                    # Zamawiana ilość w formacie Stokrotki to pierwsza liczba zmiennoprzecinkowa na końcu nazwy
-                    # Oczyszczamy nazwę usuwając z końca liczby i jednostki miary (SZT, KG)
                     nazwa_czysta = re.sub(r'\s+(SZT|KG|szt|kg).*', '', reszta_linii, flags=re.IGNORECASE).strip().upper()
-                    
-                    # Pierwsza liczba z wyciągniętych to nasza ilość (np. 360.00)
                     ilosc_koncowa = float(liczby[0].replace(',', '.'))
                     
                     if ilosc_koncowa > 0:
                         jm = "szt" if "SZT" in reszta_linii.upper() else "kg"
-                        
                         w_opak = 10.0
                         for k, waga in PRZELICZNIKI_STOKROTKA.items():
                             if k in nazwa_czysta: w_opak = waga; break
@@ -226,4 +218,21 @@ def buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary):
     wb.save(output)
     return output.getvalue()
 
-uploaded_file = st.file_uploader("Załaduj oryginalny plik tekstowy
+# Zabezpieczone linijki interfejsu (krótkie, bez łamania wierszy)
+uploaded_file = st.file_uploader("Wgraj plik zamówienia Stokrotki (.TXT)", type=["txt"])
+
+if uploaded_file is not None:
+    file_bytes = uploaded_file.read()
+    with st.spinner("Przetwarzanie pliku..."):
+        nr_zam, data_zam, data_dost, miejsce, towary = dekoduj_txt_stokrotka(file_bytes)
+        if towary:
+            wz_excel = buduj_excel_stokrotka(nr_zam, data_zam, data_dost, miejsce, towary)
+            st.success(f"Wygenerowano WZ Stokrotka nr: {nr_zam}")
+            st.download_button(
+                label="📥 Pobierz oficjalną WZ Stokrotka (Excel)",
+                data=wz_excel,
+                file_name=f"WZ_STOKROTKA_{nr_zam.replace('/', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.error("Błąd odczytu. System nie odnalazł linii produktowych.")
