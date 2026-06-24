@@ -5,8 +5,8 @@ import os
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", page_icon="🥦", layout="centered")
 
-st.title("🥦 JANMAR WZ-Stokrotka Web v4.0")
-st.subheader("Oryginalny kod z Twojego Maca przeniesiony na stronę")
+st.title("🥦 JANMAR WZ-Stokrotka Web v4.1")
+st.subheader("Oryginalny silnik z Twojego Maca przeniesiony na stronę internetową")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_STOKROTKA = {
@@ -34,26 +34,24 @@ else:
         nazwa_pliku = uploaded_file.name
         file_bytes = uploaded_file.read()
         
-        # Dokładnie tak samo dekodujemy jak w oryginalnym skrypcie na Macu
+        # Odtworzenie identycznego czytania linii jak f.readlines() na Macu
         try: tekst = file_bytes.decode('cp1250', errors='ignore')
         except: tekst = file_bytes.decode('utf-8', errors='ignore')
         
-        linie = tekst.split('\n')
+        # Podział z zachowaniem struktury windowsowej dla dokładności wycinania znaków
+        linie = tekst.splitlines(keepends=True)
         
-        # Wyciąganie numeru zamówienia dokładnie z Twojej logiki z Maca
         nr_zam = "Nieznany"
         if "nr" in nazwa_pliku.lower():
-            try: nr_zam = nazwa_pliku.lower().split("nr")[1].split()[0].replace(".txt","").replace(".txt","")
-            except: nr_zam = nazwa_pliku.replace(".TXT","").replace(".txt","")
+            try: nr_zam = nazwa_pliku.lower().split("nr")[1].split()[0].replace(".txt","")
+            except: nr_zam = nazwa_pliku.replace(".txt","").replace(".TXT","")
         else:
-            nr_zam = nazwa_pliku.replace(".TXT","").replace(".txt","")
+            nr_zam = nazwa_pliku.replace(".txt","").replace(".TXT","")
             
-        # Czyszczenie numeru z ewentualnych śmieci znakowych
         nr_zam = "".join([c for c in nr_zam if c.isdigit() or c in ['/', '_', '-']])
 
         towary = []
         for line_raw in linie:
-            # Oryginalne wycinanie pozycjami z agent_stokrotka.py
             if len(line_raw) > 45:
                 kod_part = line_raw[0:15].strip()
                 if '/' in kod_part:
@@ -89,7 +87,6 @@ else:
             wb = openpyxl.load_workbook(szablon_path)
             ws = wb["Dokument WZ"]
             
-            # Wpisywanie numeru WZ/Zamówienia i dat (jeśli uda się wyciągnąć ze środka pliku)
             data_zamowienia = "................"
             data_dostawy = "................"
             miejsce_dostawy = "STOKROTKA CD"
@@ -112,7 +109,6 @@ else:
             ws['C9'] = data_dostawy
             ws['A11'] = f" MIEJSCE DOSTAWY: {miejsce_dostawy.upper()}"
             
-            # Wklejanie towarów dokładnie od 15 wiersza
             start_row = 15
             for idx, t in enumerate(towary):
                 r = start_row + idx
@@ -129,7 +125,7 @@ else:
             wb.save(output)
             wz_excel = output.getvalue()
             
-            st.success(f"Sukces! Dane zostały naniesione na Twój szablon wz.")
+            st.success(f"Sukces! Dane zostały naniesione na Twój szablon WZ.")
             st.download_button(
                 label="📥 Pobierz oficjalną WZ Stokrotka (Excel)",
                 data=wz_excel,
