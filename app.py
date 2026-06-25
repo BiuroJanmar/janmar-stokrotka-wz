@@ -6,8 +6,8 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v4.4")
-st.subheader("Oryginalny i czysty silnik z Twojego komputera Mac")
+st.title("JANMAR WZ-Stokrotka Web v5.0")
+st.subheader("Inteligentny, bezbłędny silnik chmurowy")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_SIECI = {
@@ -38,8 +38,9 @@ else:
         try: tekst = file_bytes.decode('cp1250', errors='ignore')
         except: tekst = file_bytes.decode('utf-8', errors='ignore')
         
-        linie = tekst.splitlines(keepends=True)
+        linie = tekst.splitlines()
         
+        # Wyciąganie numeru zamówienia
         nr_zam = "Nieznany"
         nazwa_pliku_lower = nazwa_pliku.lower()
         if "nr" in nazwa_pliku_lower:
@@ -55,36 +56,51 @@ else:
 
         towary = []
         for line_raw in linie:
-            if len(line_raw) > 45:
-                kod_part = line_raw[0:15].strip()
-                if '/' in kod_part:
-                    kod_part = kod_part.split('/')[0].strip()
+            parts = line_raw.split()
+            if len(parts) < 4:
+                continue
+                
+            # Szukamy 6-cyfrowego kodu towaru w pierwszej części linii
+            kod_part = parts[0].split('/')[0].strip()
+            
+            if kod_part.isdigit() and len(kod_part) == 6:
+                try:
+                    # Ostatni element w linii Stokrotki to ZAWSZE ilość zamawiana (np. 320.000)
+                    ilosc_koncowa = float(parts[-1].replace(',', '.'))
                     
-                if kod_part.isdigit() and len(kod_part) == 6:
-                    kod_towaru = kod_part
-                    nazwa_towaru = line_raw[12:40].strip().upper()
-                    jm = line_raw[40:46].strip().lower().replace('.', '')
-                    ilosc_str = line_raw[46:57].strip().replace(',', '.')
+                    # Jednostka miary (szt / kg)
+                    jm = "szt"
+                    for p in parts:
+                        if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
+                            jm = p.lower().replace('.', '')
+                            break
                     
-                    try:
-                        ilosc_koncowa = float(ilosc_str)
-                        if ilosc_koncowa > 0:
-                            w_opak = 10.0
-                            for klucz, waga in PRZELICZNIKI_SIECI.items():
-                                if klucz in nazwa_towaru:
-                                    w_opak = waga
-                                    break
-                                    
-                            ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
-                            kraj = ustal_kraj_pochodzenia(nazwa_towaru)
-                            
-                            towary.append({
-                                "kod": kod_towaru, "nazwa": nazwa_towaru, "jm": jm,
-                                "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
-                                "kraj": kraj
-                            })
-                    except:
-                        pass
+                    # Budujemy nazwę towaru z elementów pomiędzy kodem a resztą danych
+                    nazwa_parts = []
+                    for p in parts[1:]:
+                        if p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or (p.replace(',', '').replace('.', '').isdigit() and len(p) > 3):
+                            break
+                        nazwa_parts.append(p)
+                    
+                    nazwa_towaru = " ".join(nazwa_parts).upper()
+                    
+                    if ilosc_koncowa > 0 and len(nazwa_towaru) > 2:
+                        w_opak = 10.0
+                        for klucz, waga in PRZELICZNIKI_SIECI.items():
+                            if klucz in nazwa_towaru:
+                                w_opak = waga
+                                break
+                                
+                        ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                        kraj = ustal_kraj_pochodzenia(nazwa_towaru)
+                        
+                        towary.append({
+                            "kod": kod_part, "nazwa": nazwa_towaru, "jm": jm,
+                            "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
+                            "kraj": kraj
+                        })
+                except:
+                    pass
 
         if towary:
             wb = openpyxl.load_workbook(szablon_path)
