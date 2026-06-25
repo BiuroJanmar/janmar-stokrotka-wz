@@ -7,7 +7,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v7.2")
+st.title("JANMAR WZ-Stokrotka Web v7.3")
 st.subheader("Oficjalny i pancerny generator dokumentów WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
@@ -31,7 +31,6 @@ if uploaded_file is not None:
     nazwa_pliku = uploaded_file.name
     file_bytes = uploaded_file.read()
     
-    # Ominięcie błędów nagłówka $20$ poprzez elastyczne dekodowanie
     tekst = None
     for enc in ['cp1250', 'windows-1250', 'utf-8', 'latin1']:
         try:
@@ -50,10 +49,8 @@ if uploaded_file is not None:
     nr_zam = "Nieznany"
     for line in linie:
         if "ZAMÓWIENIE TOWARU NR" in line.upper():
-            try:
-                nr_zam = line.upper().split("NR")[1].strip()
-            except:
-                pass
+            try: nr_zam = line.upper().split("NR")[1].strip()
+            except: pass
                 
     if nr_zam == "Nieznany":
         nazwa_pliku_lower = nazwa_pliku.lower()
@@ -67,57 +64,59 @@ if uploaded_file is not None:
 
     towary = []
     for line_raw in linie:
-        # Szukanie kodu produktu za pomocą elastycznego filtra słów
-        parts = line_raw.split()
-        if len(parts) < 3:
-            continue
+        # PANCERNE SZUKANIE: Znajdź pierwsze 6 cyfr w całej linii, niezależnie od spacji, małp czy ukośników
+        match_kod = re.search(r'\b\d{6}\b', line_raw)
+        if match_kod:
+            kod_part = match_kod.group(0)
+            parts = line_raw.split()
             
-        kod_part = parts[0].split('/')[0].strip()
-        
-        # Jeśli na początku linii jest 6 cyfr - mamy towar!
-        if kod_part.isdigit() and len(kod_part) == 6:
-            try:
-                ilosc_koncowa = float(parts[-1].replace(',', '.'))
-                
-                jm = "szt"
-                for p in parts:
-                    if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
-                        jm = p.lower().replace('.', '')
-                        break
-                
-                nazwa_parts = []
-                start_adding = False
-                for p in parts:
-                    if p.split('/')[0].strip() == kod_part:
-                        start_adding = True
-                        continue
-                    if start_adding:
-                        if p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or (p.replace(',', '').replace('.', '').isdigit() and len(p) > 3):
-                            break
-                        nazwa_parts.append(p)
-                
-                nazwa_towaru = " ".join(nazwa_parts).upper()
-                
-                if ilosc_koncowa > 0 and len(nazwa_towaru) > 2:
-                    w_opak = 10.0
-                    for klucz, waga in PRZELICZNIKI_SIECI.items():
-                        if klucz in nazwa_towaru:
-                            w_opak = waga
-                            break
-                            
-                    ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
-                    kraj = ustal_kraj_pochodzenia(nazwa_towaru)
+            # Linia musi mieć odpowiednią długość, by zawierać produkt i ilość
+            if len(parts) >= 3:
+                try:
+                    # Ilość to zawsze ostatni element w wierszu
+                    ilosc_koncowa = float(parts[-1].replace(',', '.'))
                     
-                    towary.append({
-                        "kod": kod_part, "nazwa": nazwa_towaru, "jm": jm,
-                        "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
-                        "kraj": kraj
-                    })
-            except:
-                pass
+                    if ilosc_koncowa > 0:
+                        # Wyciągamy jm (szt/kg)
+                        jm = "szt"
+                        for p in parts:
+                            if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
+                                jm = p.lower().replace('.', '')
+                                break
+                        
+                        # Czyścimy linię z kodu i bocznych śmieci, żeby wyciągnąć czystą nazwę
+                        nazwa_brudna = line_raw.split(kod_part)[1] if kod_part in line_raw else line_raw
+                        # Usuwamy znaki specjalne z początku nazwy (np. @, /, spacje)
+                        nazwa_brudna = re.sub(r'^[@\s\/\\._\:-]+', '', nazwa_brudna)
+                        
+                        # Obcinamy końcówkę z ilościami i miarami, zostawiając sam tekst asortymentu
+                        nazwa_parts = []
+                        for p in nazwa_brudna.split():
+                            if p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or (p.replace(',', '').replace('.', '').isdigit() and len(p) > 3):
+                                break
+                            nazwa_parts.append(p)
+                        
+                        nazwa_towaru = " ".join(nazwa_parts).upper()
+                        
+                        if len(nazwa_towaru) > 2:
+                            w_opak = 10.0
+                            for klucz, waga in PRZELICZNIKI_SIECI.items():
+                                if klucz in nazwa_towaru:
+                                    w_opak = waga
+                                    break
+                                    
+                            ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                            kraj = ustal_kraj_pochodzenia(nazwa_towaru)
+                            
+                            towary.append({
+                                "kod": kod_part, "nazwa": nazwa_towaru, "jm": jm,
+                                "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
+                                "kraj": kraj
+                            })
+                except:
+                    pass
 
     if towary:
-        # BUDOWANIE DOKUMENTU OD ZERA (Generujemy czystą strukturę bez zewnętrznych szablonów)
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Dokument WZ"
@@ -138,7 +137,6 @@ if uploaded_file is not None:
         border_all = Border(left=thin, right=thin, top=thin, bottom=thin)
         double_bottom = Border(top=Side(style='thin', color='D9D9D9'), bottom=Side(style='double', color='1F497D'))
         
-        # Nagłówek dokumentu
         ws['A1'] = "DOKUMENT WZ"
         ws['A1'].font = font_title
         ws.merge_cells('G1:H1')
@@ -146,7 +144,6 @@ if uploaded_file is not None:
         ws['G1'].font = font_body_bold
         ws['G1'].alignment = Alignment(horizontal="right")
         
-        # Dane firmowe
         ws['D3'] = "DOSTAWCA:"
         ws['D3'].font = font_section
         ws['D4'] = "GPW JANMAR SP. Z O.O. SP. K."
@@ -161,7 +158,6 @@ if uploaded_file is not None:
         ws['G5'] = "ul. Projektowa 1, 20-209 Lublin"
         ws['G5'].font = font_body
         
-        # Wyciąganie dat z pliku tekstowego
         data_zamowienia = "................"
         data_dostawy = "................"
         miejsce_dostawy = "STOKROTKA CD"
@@ -192,7 +188,6 @@ if uploaded_file is not None:
         ws['A11'].alignment = Alignment(vertical="center")
         ws.row_dimensions[11].height = 24
         
-        # Tabela produktowa
         naglowki = ["Lp.", "Kod towaru", "Nazwa asortymentu", "Kraj pochodzenia", "Jm.", "W opak.", "Ilość op.", "Ilość szt./kg"]
         for col_idx, text in enumerate(naglowki, start=1):
             cell = ws.cell(row=14, column=col_idx, value=text)
@@ -204,11 +199,9 @@ if uploaded_file is not None:
         start_row = 15
         max_wiersz_siatki = 60
         
-        # Generowanie siatki do Excela
         for r in range(start_row, max_wiersz_siatki + 1):
             idx_towaru = r - start_row
             ws.row_dimensions[r].height = 22
-            
             ws.cell(row=r, column=1, value=idx_towaru + 1).alignment = Alignment(horizontal="center")
             
             for c in range(1, 9):
@@ -236,10 +229,8 @@ if uploaded_file is not None:
                 c_koncowa.alignment = Alignment(horizontal="right")
                 c_koncowa.number_format = '#,##0'
             else:
-                # Czyszczenie domyślnego kraju dla pustych wierszy siatki
                 ws.cell(row=r, column=4, value="")
 
-        # Podsumowania na dole
         sum_row = max_wiersz_siatki + 2
         ws.row_dimensions[sum_row].height = 24
         ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
@@ -257,7 +248,6 @@ if uploaded_file is not None:
         ws.cell(row=footer_row, column=6, value="ILOŚĆ PALET EURO: ..................").font = font_body_bold
         ws.cell(row=footer_row, column=6).alignment = Alignment(horizontal="right")
 
-        # Rozwijana lista krajów
         kraje_lista = '"POLSKA, HISZPANIA, HOLANDIA, PORTUGALIA, WŁOCHY, GRECJA, NIEMCY, FRANCJA, TURCJA, MAROKO"'
         dv = DataValidation(type="list", formula1=kraje_lista, allow_blank=True)
         ws.add_data_validation(dv)
