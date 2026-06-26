@@ -7,8 +7,8 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v8.7")
-st.subheader("Oficjalny, stabilny generator dokumentów WZ")
+st.title("JANMAR WZ-Stokrotka Web v9.0")
+st.subheader("Oficjalny, w 100% dopasowany generator dokumentów WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_SIECI = {
@@ -66,41 +66,44 @@ if uploaded_file is not None:
     towary = []
     for line_raw in linie:
         line_clean = line_raw.strip()
-        if not line_clean or len(line_clean) < 30:
-            continue
+        
+        # Szukamy 13-cyfrowego kodu EAN (zawsze zaczyna się od 2000...)
+        match_ean = re.search(r'\b(2000\d{9})\b', line_clean)
+        
+        if match_ean:
+            ean_kod = match_ean.group(1)
             
-        # Szukamy 6 cyfr kodu towaru na początku linii
-        match_kod = re.match(r'^(\d{6})', line_clean)
-        if match_kod:
-            kod_part = match_kod.group(1)
+            # Kod towaru (indeks) to to, co stoi na samym początku linii przed nazwą
+            parts_poczatkowe = line_clean.split(ean_kod)[0].split()
+            if not parts_poczatkowe:
+                continue
+                
+            kod_part = parts_poczatkowe[0].strip()
+            # Upewniamy się, że to indeks towaru
+            if not kod_part.isdigit():
+                continue
             
             try:
-                # Szukamy wszystkich liczb w linii (w tym tych z kropkami typu 320.000)
-                liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', line_clean)
+                # Wyciągamy resztę wiersza PO kodzie EAN, gdzie leżą ilości i ceny
+                strefa_po_ean = line_clean.split(ean_kod)[1].strip()
+                # Łapiemy wszystkie liczby (zarówno całe, jak i z kropkami) z tej strefy
+                liczby_po_ean = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', strefa_po_ean)
                 
-                if liczby:
-                    # Ilość w Stokrotce to bezwzględnie ostatnia liczba w wierszu
-                    ilosc_str = liczby[-1]
-                    ilosc_koncowa = float(ilosc_str.replace(',', '.'))
+                # Pierwszy element po EAN to j_m (np. kg / szt.), więc szukamy liczb zaraz po nim
+                if len(liczby_po_ean) >= 2:
+                    # Pierwsza liczba po EAN to bezwzględnie ILOŚĆ ZAMÓWIONA (np. 200.000)
+                    ilosc_koncowa = float(liczby_po_ean[0].replace(',', '.'))
                     
-                    # Zabezpieczenie: jeśli ostatnia liczba to EAN, weź przedostatnią
-                    if ilosc_koncowa > 50000 and len(liczby) >= 2:
-                        ilosc_str = liczby[-2]
-                        ilosc_koncowa = float(ilosc_str.replace(',', '.'))
-                    
+                    # Wyciągamy jm
                     jm = "szt"
                     if "kg" in line_clean.lower():
                         jm = "kg"
-                        
-                    # Wycinamy nazwę ze środka linii (pomiędzy kodem a końcowymi cyframi/EANami)
-                    srodek = line_clean[6:].strip()
-                    # Pozbywamy się końcowych liczb z linii, żeby została sama czysta nazwa towaru
-                    nazwa_towaru = re.sub(r'\s+\d{10,14}\s+.*|\s+\d+[\.,]\d+\s*.*|\s+\d+\s*$', '', srodek).strip().upper()
+                    
+                    # Nazwa towaru to wszystko pomiędzy indeksem a kodem EAN
+                    nazwa_towaru = " ".join(parts_poczatkowe[1:]).upper()
+                    # Czyszczenie przyklejonych jm z nazwy
                     nazwa_towaru = re.sub(r'\b(SZT|KG|SZT\.|KG\.)\b', '', nazwa_towaru).strip()
                     
-                    if len(nazwa_towaru) < 2:
-                        nazwa_towaru = "TOWAR " + kod_part
-                        
                     if ilosc_koncowa > 0:
                         w_opak = 10.0
                         for klucz, waga in PRZELICZNIKI_SIECI.items():
