@@ -7,7 +7,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v8.4")
+st.title("JANMAR WZ-Stokrotka Web v8.2")
 st.subheader("Oficjalny, w 100% dopasowany generator dokumentów WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
@@ -66,31 +66,36 @@ if uploaded_file is not None:
     towary = []
     for line_raw in linie:
         parts = line_raw.split()
-        if len(parts) < 2:
+        if len(parts) < 4:
             continue
             
         kod_part = parts[0].split('/')[0].strip()
         
+        # Jeśli linia zaczyna się od 6-cyfrowego kodu towaru
         if kod_part.isdigit() and len(kod_part) == 6:
             try:
+                # OSTATNI element to zawsze zamawiana ilość (odporność na EAN!)
                 ilosc_str = parts[-1].replace(',', '.')
                 ilosc_koncowa = float(ilosc_str)
                 
+                # PRZEDOSTATNI element lub trzeci od końca to jednostka miary
                 jm = "szt"
-                for p in parts:
+                for p in parts[-3:-1]:
                     if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
                         jm = p.lower().replace('.', '')
                         break
                 
+                # Budujemy czystą nazwę ze środkówych elementów (omijamy kod z przodu i EAN/ilości z tyłu)
                 nazwa_parts = []
                 for p in parts[1:]:
-                    if (p.isdigit() and len(p) >= 10) or p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or p == parts[-1]:
+                    # Jeśli trafimy na kod EAN (długi ciąg cyfr) lub jednostkę miary - kończymy zbieranie nazwy
+                    if (p.isdigit() and len(p) >= 10) or p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
                         break
                     nazwa_parts.append(p)
                 
                 nazwa_towaru = " ".join(nazwa_parts).upper()
                 
-                if ilosc_koncowa > 0:
+                if ilosc_koncowa > 0 and len(nazwa_towaru) > 2:
                     w_opak = 10.0
                     for klucz, waga in PRZELICZNIKI_SIECI.items():
                         if klucz in nazwa_towaru:
@@ -101,8 +106,9 @@ if uploaded_file is not None:
                     kraj = ustal_kraj_pochodzenia(nazwa_towaru)
                     
                     towary.append({
-                        "kod": kod_part, "nazwa": nazwa_towaru if len(nazwa_towaru) > 2 else "TOWAR " + kod_part, 
-                        "jm": jm, "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa, "kraj": kraj
+                        "kod": kod_part, "nazwa": nazwa_towaru, "jm": jm,
+                        "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
+                        "kraj": kraj
                     })
             except:
                 pass
