@@ -7,7 +7,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v8.3")
+st.title("JANMAR WZ-Stokrotka Web v8.4")
 st.subheader("Oficjalny, w 100% dopasowany generator dokumentów WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
@@ -71,10 +71,8 @@ if uploaded_file is not None:
             
         kod_part = parts[0].split('/')[0].strip()
         
-        # Jeśli linia zaczyna się od 6 cyfr - bierzemy bez zbędnych pytań
         if kod_part.isdigit() and len(kod_part) == 6:
             try:
-                # Ostatni element to ZAWSZE ilość
                 ilosc_str = parts[-1].replace(',', '.')
                 ilosc_koncowa = float(ilosc_str)
                 
@@ -84,7 +82,6 @@ if uploaded_file is not None:
                         jm = p.lower().replace('.', '')
                         break
                 
-                # Zbieramy nazwę ze wszystkiego co jest pomiędzy kodem a ilościami/EANami
                 nazwa_parts = []
                 for p in parts[1:]:
                     if (p.isdigit() and len(p) >= 10) or p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or p == parts[-1]:
@@ -158,4 +155,113 @@ if uploaded_file is not None:
         for line in linie:
             if "Termin dostawy" in line:
                 match_dost = re.search(r'Termin dostawy\s+([\d\.]+)', line)
-                match_wyst = re.
+                match_wyst = re.search(r'Data wystawienia\s+([\d\.]+)', line)
+                if match_dost: data_dostawy = match_dost.group(1)
+                if match_wyst: data_zamowienia = match_wyst.group(1)
+            if "Towar należy dostarczyć:" in line:
+                try:
+                    idx = linie.index(line)
+                    if idx + 1 < len(linie): miejsce_dostawy = linie[idx+1].strip()
+                except: pass
+
+        ws.cell(row=7, column=1, value="Nr zamówienia Stokrotka:").font = font_body_bold
+        ws.cell(row=7, column=3, value=nr_zam).font = font_body
+        ws.cell(row=8, column=1, value="Data zamówienia:").font = font_body_bold
+        ws.cell(row=8, column=3, value=data_zamowienia).font = font_body
+        ws.cell(row=9, column=1, value="Data dostawy:").font = font_body_bold
+        ws.cell(row=9, column=3, value=data_dostawy).font = font_body
+        
+        ws.merge_cells('A11:H11')
+        ws['A11'] = f" MIEJSCE DOSTAWY: {miejsce_dostawy.upper()}"
+        ws['A11'].font = font_body_bold
+        ws['A11'].fill = info_bar_fill
+        ws['A11'].alignment = Alignment(vertical="center")
+        ws.row_dimensions[11].height = 24
+        
+        naglowki = ["Lp.", "Kod towaru", "Nazwa asortymentu", "Kraj pochodzenia", "Jm.", "W opak.", "Ilość op.", "Ilość szt./kg"]
+        for col_idx, text in enumerate(naglowki, start=1):
+            cell = ws.cell(row=14, column=col_idx, value=text)
+            cell.font = font_header
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[14].height = 24
+            
+        start_row = 15
+        max_wiersz_siatki = 60
+        
+        for r in range(start_row, max_wiersz_siatki + 1):
+            idx_towaru = r - start_row
+            ws.row_dimensions[r].height = 22
+            ws.cell(row=r, column=1, value=idx_towaru + 1).alignment = Alignment(horizontal="center")
+            
+            for c in range(1, 9):
+                cell = ws.cell(row=r, column=c)
+                cell.border = border_all
+                cell.font = font_body
+                if idx_towaru % 2 == 1: cell.fill = zebra_fill
+                    
+            if idx_towaru < len(towary):
+                t = towary[idx_towaru]
+                ws.cell(row=r, column=2, value=t['kod']).alignment = Alignment(horizontal="center")
+                ws.cell(row=r, column=3, value=t['nazwa']).alignment = Alignment(horizontal="left")
+                ws.cell(row=r, column=4, value=t['kraj']).alignment = Alignment(horizontal="center")
+                ws.cell(row=r, column=5, value=t['jm']).alignment = Alignment(horizontal="center")
+                
+                c_w_opak = ws.cell(row=r, column=6, value=t['w_opak'])
+                c_w_opak.alignment = Alignment(horizontal="right")
+                c_w_opak.number_format = '#,##0.0'
+                
+                c_op = ws.cell(row=r, column=7, value=t['ilosc_op'])
+                c_op.alignment = Alignment(horizontal="right")
+                c_op.number_format = '#,##0.0'
+                
+                c_koncowa = ws.cell(row=r, column=8, value=t['ilosc_koncowa'])
+                c_koncowa.alignment = Alignment(horizontal="right")
+                c_koncowa.number_format = '#,##0'
+            else:
+                ws.cell(row=r, column=4, value="")
+
+        sum_row = max_wiersz_siatki + 2
+        ws.row_dimensions[sum_row].height = 24
+        ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
+        ws.cell(row=sum_row, column=6).alignment = Alignment(horizontal="right")
+        
+        sum_cell = ws.cell(row=sum_row, column=8, value=f"=SUM(H15:H{max_wiersz_siatki})")
+        sum_cell.font = font_body_bold
+        sum_cell.alignment = Alignment(horizontal="right")
+        sum_cell.border = double_bottom
+        sum_cell.number_format = '#,##0'
+        
+        footer_row = sum_row + 2
+        ws.row_dimensions[footer_row].height = 22
+        ws.cell(row=footer_row, column=1, value="DOKUMENT SPORZĄDZIŁ: .............................").font = font_body_bold
+        ws.cell(row=footer_row, column=6, value="ILOŚĆ PALET EURO: ..................").font = font_body_bold
+        ws.cell(row=footer_row, column=6).alignment = Alignment(horizontal="right")
+
+        kraje_lista = '"POLSKA, HISZPANIA, HOLANDIA, PORTUGALIA, WŁOCHY, GRECJA, NIEMCY, FRANCJA, TURCJA, MAROKO"'
+        dv = DataValidation(type="list", formula1=kraje_lista, allow_blank=True)
+        ws.add_data_validation(dv)
+        dv.add(f"D15:D{max_wiersz_siatki}")
+        
+        ws.column_dimensions['A'].width = 5
+        ws.column_dimensions['B'].width = 13
+        ws.column_dimensions['C'].width = 38
+        ws.column_dimensions['D'].width = 18
+        ws.column_dimensions['E'].width = 8
+        ws.column_dimensions['F'].width = 10
+        ws.column_dimensions['G'].width = 10
+        ws.column_dimensions['H'].width = 14
+        
+        output = BytesIO()
+        wb.save(output)
+        wz_excel = output.getvalue()
+        
+        st.success(f"Sukces! Wygenerowano pełną WZ Stokrotka dla zamówienia nr: {nr_zam}")
+        st.download_button(
+            label="📥 Pobierz oficjalną WZ Stokrotka (Excel)",
+            data=wz_excel,
+            file_name=f"WZ_STOKROTKA_{nr_zam}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.error("Błąd odczytu. System nie odnalazł linii produktowych.")
