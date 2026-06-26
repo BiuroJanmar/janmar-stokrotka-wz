@@ -7,8 +7,8 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v8.6")
-st.subheader("Oficjalny, ultra-stabilny generator dokumentów WZ (Silnik Eurocash)")
+st.title("JANMAR WZ-Stokrotka Web v8.7")
+st.subheader("Oficjalny, stabilny generator dokumentów WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_SIECI = {
@@ -66,33 +66,38 @@ if uploaded_file is not None:
     towary = []
     for line_raw in linie:
         line_clean = line_raw.strip()
-        if not line_clean:
+        if not line_clean or len(line_clean) < 30:
             continue
             
-        # SZUKAMY KODU TOWARU NA POCZĄTKU LINII (DOKŁADNIE JAK W EUROCASH)
+        # Szukamy 6 cyfr kodu towaru na początku linii
         match_kod = re.match(r'^(\d{6})', line_clean)
         if match_kod:
             kod_part = match_kod.group(1)
             
             try:
-                # Szukamy wszystkich ciągów liczb/ilości w linii
+                # Szukamy wszystkich liczb w linii (w tym tych z kropkami typu 320.000)
                 liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', line_clean)
-                if len(liczby) >= 2:
-                    # Ostatnia liczba to ilość zamówiona (odrzucamy ewentualny EAN przed nią)
+                
+                if liczby:
+                    # Ilość w Stokrotce to bezwzględnie ostatnia liczba w wierszu
                     ilosc_str = liczby[-1]
                     ilosc_koncowa = float(ilosc_str.replace(',', '.'))
                     
-                    # Wyciągamy jednostkę miary (szt/kg)
+                    # Zabezpieczenie: jeśli ostatnia liczba to EAN, weź przedostatnią
+                    if ilosc_koncowa > 50000 and len(liczby) >= 2:
+                        ilosc_str = liczby[-2]
+                        ilosc_koncowa = float(ilosc_str.replace(',', '.'))
+                    
                     jm = "szt"
                     if "kg" in line_clean.lower():
                         jm = "kg"
                         
-                    # Wycinamy nazwę produktu pomiędzy kodem a resztą danych
-                    środek = line_clean[6:].strip()
-                    # Usuwamy z nazwy kody EAN i końcowe liczby, żeby została czysta nazwa towaru
-                    nazwa_towaru = re.sub(r'\s+\d{10,14}\s+.*|\s+\d+[\.,]\d+\s*.*|\s+\d+\s*$', '', środek).strip().upper()
+                    # Wycinamy nazwę ze środka linii (pomiędzy kodem a końcowymi cyframi/EANami)
+                    srodek = line_clean[6:].strip()
+                    # Pozbywamy się końcowych liczb z linii, żeby została sama czysta nazwa towaru
+                    nazwa_towaru = re.sub(r'\s+\d{10,14}\s+.*|\s+\d+[\.,]\d+\s*.*|\s+\d+\s*$', '', srodek).strip().upper()
+                    nazwa_towaru = re.sub(r'\b(SZT|KG|SZT\.|KG\.)\b', '', nazwa_towaru).strip()
                     
-                    # Jeśli nazwa ucięła się za mocno, bierzemy prosty fallback bezpieczny dla oka
                     if len(nazwa_towaru) < 2:
                         nazwa_towaru = "TOWAR " + kod_part
                         
