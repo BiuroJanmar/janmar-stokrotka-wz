@@ -7,8 +7,8 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v8.4")
-st.subheader("Oficjalny, w 100% dopasowany generator dokumentów WZ")
+st.title("JANMAR WZ-Stokrotka Web v8.6")
+st.subheader("Oficjalny, ultra-stabilny generator dokumentów WZ (Silnik Eurocash)")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_SIECI = {
@@ -65,45 +65,52 @@ if uploaded_file is not None:
 
     towary = []
     for line_raw in linie:
-        parts = line_raw.split()
-        if len(parts) < 2:
+        line_clean = line_raw.strip()
+        if not line_clean:
             continue
             
-        kod_part = parts[0].split('/')[0].strip()
-        
-        if kod_part.isdigit() and len(kod_part) == 6:
+        # SZUKAMY KODU TOWARU NA POCZĄTKU LINII (DOKŁADNIE JAK W EUROCASH)
+        match_kod = re.match(r'^(\d{6})', line_clean)
+        if match_kod:
+            kod_part = match_kod.group(1)
+            
             try:
-                ilosc_str = parts[-1].replace(',', '.')
-                ilosc_koncowa = float(ilosc_str)
-                
-                jm = "szt"
-                for p in parts:
-                    if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
-                        jm = p.lower().replace('.', '')
-                        break
-                
-                nazwa_parts = []
-                for p in parts[1:]:
-                    if (p.isdigit() and len(p) >= 10) or p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or p == parts[-1]:
-                        break
-                    nazwa_parts.append(p)
-                
-                nazwa_towaru = " ".join(nazwa_parts).upper()
-                
-                if ilosc_koncowa > 0:
-                    w_opak = 10.0
-                    for klucz, waga in PRZELICZNIKI_SIECI.items():
-                        if klucz in nazwa_towaru:
-                            w_opak = waga
-                            break
-                            
-                    ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
-                    kraj = ustal_kraj_pochodzenia(nazwa_towaru)
+                # Szukamy wszystkich ciągów liczb/ilości w linii
+                liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', line_clean)
+                if len(liczby) >= 2:
+                    # Ostatnia liczba to ilość zamówiona (odrzucamy ewentualny EAN przed nią)
+                    ilosc_str = liczby[-1]
+                    ilosc_koncowa = float(ilosc_str.replace(',', '.'))
                     
-                    towary.append({
-                        "kod": kod_part, "nazwa": nazwa_towaru if len(nazwa_towaru) > 2 else "TOWAR " + kod_part, 
-                        "jm": jm, "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa, "kraj": kraj
-                    })
+                    # Wyciągamy jednostkę miary (szt/kg)
+                    jm = "szt"
+                    if "kg" in line_clean.lower():
+                        jm = "kg"
+                        
+                    # Wycinamy nazwę produktu pomiędzy kodem a resztą danych
+                    środek = line_clean[6:].strip()
+                    # Usuwamy z nazwy kody EAN i końcowe liczby, żeby została czysta nazwa towaru
+                    nazwa_towaru = re.sub(r'\s+\d{10,14}\s+.*|\s+\d+[\.,]\d+\s*.*|\s+\d+\s*$', '', środek).strip().upper()
+                    
+                    # Jeśli nazwa ucięła się za mocno, bierzemy prosty fallback bezpieczny dla oka
+                    if len(nazwa_towaru) < 2:
+                        nazwa_towaru = "TOWAR " + kod_part
+                        
+                    if ilosc_koncowa > 0:
+                        w_opak = 10.0
+                        for klucz, waga in PRZELICZNIKI_SIECI.items():
+                            if klucz in nazwa_towaru:
+                                w_opak = waga
+                                break
+                                
+                        ilosc_op = round(ilosc_koncowa / w_opak, 1) if w_opak > 0 else 0
+                        kraj = ustal_kraj_pochodzenia(nazwa_towaru)
+                        
+                        towary.append({
+                            "kod": kod_part, "nazwa": nazwa_towaru, "jm": jm,
+                            "w_opak": w_opak, "ilosc_op": ilosc_op, "ilosc_koncowa": ilosc_koncowa,
+                            "kraj": kraj
+                        })
             except:
                 pass
 
