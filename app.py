@@ -7,8 +7,8 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v7.3")
-st.subheader("Oficjalny i pancerny generator dokumentów WZ")
+st.title("JANMAR WZ-Stokrotka Web v8.0")
+st.subheader("Pancerny, bezbłędny automatyczny generator WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
 PRZELICZNIKI_SIECI = {
@@ -45,14 +45,18 @@ if uploaded_file is not None:
     
     linie = tekst.splitlines()
     
-    # Wyciąganie numeru zamówienia
+    # Wyciąganie numeru zamówienia ze środka tekstu
     nr_zam = "Nieznany"
     for line in linie:
         if "ZAMÓWIENIE TOWARU NR" in line.upper():
-            try: nr_zam = line.upper().split("NR")[1].strip()
-            except: pass
+            try:
+                nr_zam = line.upper().split("NR")[1].strip()
+                # Czyszczenie z ewentualnych dopisków na końcu linii
+                nr_zam = nr_zam.split()[0]
+            except:
+                pass
                 
-    if nr_zam == "Nieznany":
+    if nr_zam == "Nieznany" or not nr_zam:
         nazwa_pliku_lower = nazwa_pliku.lower()
         if "nr" in nazwa_pliku_lower:
             try: nr_zam = nazwa_pliku_lower.split("nr")[1].split()[0].replace(".txt","")
@@ -64,39 +68,44 @@ if uploaded_file is not None:
 
     towary = []
     for line_raw in linie:
-        # PANCERNE SZUKANIE: Znajdź pierwsze 6 cyfr w całej linii, niezależnie od spacji, małp czy ukośników
-        match_kod = re.search(r'\b\d{6}\b', line_raw)
-        if match_kod:
-            kod_part = match_kod.group(0)
-            parts = line_raw.split()
+        line_clean = line_raw.strip()
+        
+        # 1. SZUKAMY KODU (dokładnie pierwszych 6 cyfr na początku wiersza)
+        match_kod = re.match(r'^(\d{6})\b', line_clean)
+        if not match_kod:
+            # Próba znalezienia kodu jeśli przed nim jest jakiś indeks klienta (np. 1084@)
+            match_kod = re.search(r'\b(\d{6})\b', line_clean[:20])
             
-            # Linia musi mieć odpowiednią długość, by zawierać produkt i ilość
-            if len(parts) >= 3:
+        if match_kod:
+            kod_part = match_kod.group(1)
+            
+            # 2. SZUKAMY ILOŚCI (szukamy dowolnej liczby zmiennoprzecinkowej w linii, np. 320.000 lub 150,00)
+            # Wyciągamy wszystkie liczby z linii i sprawdzamy końcówkę zamówienia
+            liczby = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', line_clean)
+            if len(liczby) >= 2:
                 try:
-                    # Ilość to zawsze ostatni element w wierszu
-                    ilosc_koncowa = float(parts[-1].replace(',', '.'))
+                    # Ilość w Stokrotce to przeważnie ostatnia lub przedostatnia poprawna liczba
+                    ilosc_str = liczby[-1]
+                    ilosc_koncowa = float(ilosc_str.replace(',', '.'))
+                    
+                    # Zabezpieczenie: jeśli ostatnia liczba to wielki EAN (np. 2000000067), weź poprzednią
+                    if ilosc_koncowa > 50000 and len(liczby) >= 3:
+                        ilosc_str = liczby[-2]
+                        ilosc_koncowa = float(ilosc_str.replace(',', '.'))
                     
                     if ilosc_koncowa > 0:
-                        # Wyciągamy jm (szt/kg)
+                        # 3. WYCIĄGAMY NAZWĘ (wszystko pomiędzy kodem a kodem EAN / ilościami)
+                        parts = line_clean.split(kod_part)[1]
+                        # obcinamy końcówkę z cyframi
+                        nazwa_brudna = re.split(r'\b\d{10,}\b|\b\d+[\.,]\d+', parts)[0]
+                        nazwa_towaru = re.sub(r'[@\s\/\\._\:-]+', ' ', nazwa_brudna).strip().upper()
+                        
+                        # Usunięcie jednostek miary z nazwy jeśli się przykleiły
+                        nazwa_towaru = re.sub(r'\b(SZT|KG|SZT\.|KG\.)\b', '', nazwa_towaru).strip()
+                        
                         jm = "szt"
-                        for p in parts:
-                            if p.lower() in ['szt', 'szt.', 'kg', 'kg.']:
-                                jm = p.lower().replace('.', '')
-                                break
-                        
-                        # Czyścimy linię z kodu i bocznych śmieci, żeby wyciągnąć czystą nazwę
-                        nazwa_brudna = line_raw.split(kod_part)[1] if kod_part in line_raw else line_raw
-                        # Usuwamy znaki specjalne z początku nazwy (np. @, /, spacje)
-                        nazwa_brudna = re.sub(r'^[@\s\/\\._\:-]+', '', nazwa_brudna)
-                        
-                        # Obcinamy końcówkę z ilościami i miarami, zostawiając sam tekst asortymentu
-                        nazwa_parts = []
-                        for p in nazwa_brudna.split():
-                            if p.lower() in ['szt', 'szt.', 'kg', 'kg.'] or (p.replace(',', '').replace('.', '').isdigit() and len(p) > 3):
-                                break
-                            nazwa_parts.append(p)
-                        
-                        nazwa_towaru = " ".join(nazwa_parts).upper()
+                        if "KG" in line_clean.upper():
+                            jm = "kg"
                         
                         if len(nazwa_towaru) > 2:
                             w_opak = 10.0
@@ -122,7 +131,6 @@ if uploaded_file is not None:
         ws.title = "Dokument WZ"
         ws.views.sheetView[0].showGridLines = True
         
-        # Style wizualne Janmar
         font_title = Font(name="Arial", size=15, bold=True, color="1F497D")
         font_section = Font(name="Arial", size=10, bold=True, color="000000")
         font_header = Font(name="Arial", size=10, bold=True, color="FFFFFF")
