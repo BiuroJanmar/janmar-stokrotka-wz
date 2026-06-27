@@ -7,7 +7,7 @@ import re
 
 st.set_page_config(page_title="Janmar WZ Stokrotka", layout="centered")
 
-st.title("JANMAR WZ-Stokrotka Web v9.0")
+st.title("JANMAR WZ-Stokrotka Web v9.1")
 st.subheader("Oficjalny, w 100% dopasowany generator dokumentów WZ")
 st.write("Wgraj surowy plik tekstowy (.TXT) zamówienia ze Stokrotki.")
 
@@ -67,41 +67,29 @@ if uploaded_file is not None:
     for line_raw in linie:
         line_clean = line_raw.strip()
         
-        # Szukamy 13-cyfrowego kodu EAN (zawsze zaczyna się od 2000...)
         match_ean = re.search(r'\b(2000\d{9})\b', line_clean)
-        
         if match_ean:
             ean_kod = match_ean.group(1)
-            
-            # Kod towaru (indeks) to to, co stoi na samym początku linii przed nazwą
             parts_poczatkowe = line_clean.split(ean_kod)[0].split()
             if not parts_poczatkowe:
                 continue
                 
             kod_part = parts_poczatkowe[0].strip()
-            # Upewniamy się, że to indeks towaru
             if not kod_part.isdigit():
                 continue
             
             try:
-                # Wyciągamy resztę wiersza PO kodzie EAN, gdzie leżą ilości i ceny
                 strefa_po_ean = line_clean.split(ean_kod)[1].strip()
-                # Łapiemy wszystkie liczby (zarówno całe, jak i z kropkami) z tej strefy
                 liczby_po_ean = re.findall(r'\b\d+[\.,]\d+\b|\b\d+\b', strefa_po_ean)
                 
-                # Pierwszy element po EAN to j_m (np. kg / szt.), więc szukamy liczb zaraz po nim
                 if len(liczby_po_ean) >= 2:
-                    # Pierwsza liczba po EAN to bezwzględnie ILOŚĆ ZAMÓWIONA (np. 200.000)
                     ilosc_koncowa = float(liczby_po_ean[0].replace(',', '.'))
                     
-                    # Wyciągamy jm
                     jm = "szt"
                     if "kg" in line_clean.lower():
                         jm = "kg"
                     
-                    # Nazwa towaru to wszystko pomiędzy indeksem a kodem EAN
                     nazwa_towaru = " ".join(parts_poczatkowe[1:]).upper()
-                    # Czyszczenie przyklejonych jm z nazwy
                     nazwa_towaru = re.sub(r'\b(SZT|KG|SZT\.|KG\.)\b', '', nazwa_towaru).strip()
                     
                     if ilosc_koncowa > 0:
@@ -202,46 +190,45 @@ if uploaded_file is not None:
         ws.row_dimensions[14].height = 24
             
         start_row = 15
-        max_wiersz_siatki = 60
         
-        for r in range(start_row, max_wiersz_siatki + 1):
-            idx_towaru = r - start_row
+        # Wypełniamy tylko tyle wierszy, ile faktycznie jest towarów
+        for idx_towaru, t in enumerate(towary):
+            r = start_row + idx_towaru
             ws.row_dimensions[r].height = 22
+            
             ws.cell(row=r, column=1, value=idx_towaru + 1).alignment = Alignment(horizontal="center")
+            ws.cell(row=r, column=2, value=t['kod']).alignment = Alignment(horizontal="center")
+            ws.cell(row=r, column=3, value=t['nazwa']).alignment = Alignment(horizontal="left")
+            ws.cell(row=r, column=4, value=t['kraj']).alignment = Alignment(horizontal="center")
+            ws.cell(row=r, column=5, value=t['jm']).alignment = Alignment(horizontal="center")
+            
+            c_w_opak = ws.cell(row=r, column=6, value=t['w_opak'])
+            c_w_opak.alignment = Alignment(horizontal="right")
+            c_w_opak.number_format = '#,##0.0'
+            
+            c_op = ws.cell(row=r, column=7, value=t['ilosc_op'])
+            c_op.alignment = Alignment(horizontal="right")
+            c_op.number_format = '#,##0.0'
+            
+            c_koncowa = ws.cell(row=r, column=8, value=t['ilosc_koncowa'])
+            c_koncowa.alignment = Alignment(horizontal="right")
+            c_koncowa.number_format = '#,##0'
             
             for c in range(1, 9):
                 cell = ws.cell(row=r, column=c)
                 cell.border = border_all
                 cell.font = font_body
                 if idx_towaru % 2 == 1: cell.fill = zebra_fill
-                    
-            if idx_towaru < len(towary):
-                t = towary[idx_towaru]
-                ws.cell(row=r, column=2, value=t['kod']).alignment = Alignment(horizontal="center")
-                ws.cell(row=r, column=3, value=t['nazwa']).alignment = Alignment(horizontal="left")
-                ws.cell(row=r, column=4, value=t['kraj']).alignment = Alignment(horizontal="center")
-                ws.cell(row=r, column=5, value=t['jm']).alignment = Alignment(horizontal="center")
-                
-                c_w_opak = ws.cell(row=r, column=6, value=t['w_opak'])
-                c_w_opak.alignment = Alignment(horizontal="right")
-                c_w_opak.number_format = '#,##0.0'
-                
-                c_op = ws.cell(row=r, column=7, value=t['ilosc_op'])
-                c_op.alignment = Alignment(horizontal="right")
-                c_op.number_format = '#,##0.0'
-                
-                c_koncowa = ws.cell(row=r, column=8, value=t['ilosc_koncowa'])
-                c_koncowa.alignment = Alignment(horizontal="right")
-                c_koncowa.number_format = '#,##0'
-            else:
-                ws.cell(row=r, column=4, value="")
 
-        sum_row = max_wiersz_siatki + 2
+        # Dynamiczny koniec tabeli dostosowany do liczby pozycji
+        ostatni_wiersz_danych = start_row + len(towary) - 1
+        sum_row = ostatni_wiersz_danych + 1
+        
         ws.row_dimensions[sum_row].height = 24
         ws.cell(row=sum_row, column=6, value="RAZEM NETTO:").font = font_body_bold
         ws.cell(row=sum_row, column=6).alignment = Alignment(horizontal="right")
         
-        sum_cell = ws.cell(row=sum_row, column=8, value=f"=SUM(H15:H{max_wiersz_siatki})")
+        sum_cell = ws.cell(row=sum_row, column=8, value=f"=SUM(H15:H{ostatni_wiersz_danych})")
         sum_cell.font = font_body_bold
         sum_cell.alignment = Alignment(horizontal="right")
         sum_cell.border = double_bottom
@@ -256,7 +243,7 @@ if uploaded_file is not None:
         kraje_lista = '"POLSKA, HISZPANIA, HOLANDIA, PORTUGALIA, WŁOCHY, GRECJA, NIEMCY, FRANCJA, TURCJA, MAROKO"'
         dv = DataValidation(type="list", formula1=kraje_lista, allow_blank=True)
         ws.add_data_validation(dv)
-        dv.add(f"D15:D{max_wiersz_siatki}")
+        dv.add(f"D15:D{ostatni_wiersz_danych}")
         
         ws.column_dimensions['A'].width = 5
         ws.column_dimensions['B'].width = 13
